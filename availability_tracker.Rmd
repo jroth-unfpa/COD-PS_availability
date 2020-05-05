@@ -1,0 +1,339 @@
+---
+title: "COD-PS Availability"
+date: ''
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("googlesheets4") ## working with CRAN version of googlesheets4, not the dev version on GitHub
+library(googlesheets4)
+library(tidyverse)
+library(ggrepel)
+library(treemap)
+```
+
+
+```{r "load_data", echo=FALSE, include=FALSE}
+our_url <- "https://docs.google.com/spreadsheets/d/1hjI8synLx3yfjTvfLBKgQc3Hj-XU_Lhoww_DxUTe59A/edit#gid=0"
+
+
+our_data_for_names <- read_sheet(ss=our_url,
+                                 skip=8)
+names(our_data_for_names)
+our_data <- read_sheet(ss=our_url,
+                       skip=10) %>%
+            as.data.frame()
+names(our_data) <- names(our_data_for_names)
+```
+
+```{r "function_table_recommended_action_global", echo=FALSE}
+get_table_recommended_action <- function(data,
+                                         var.name.action,
+                                         var.name.region,
+                                         specific.region=NULL) {
+# restrict data to a single region, if specified
+if (is.null(specific.region) == FALSE) {
+  stopifnot(var.name.region %in% names(data))
+  stopifnot(specific.region %in% unique(data[, var.name.region]))
+  data <- data[data[, var.name.region] == specific.region, ] 
+}
+table_recommended_action <- as.data.frame(table(data[, var.name.action], 
+                                                useNA="always"))
+table_recommended_action <- table_recommended_action %>% rename("action"="Var1",
+                                                                "count"="Freq")
+# sort categories by descending frequency
+test <- table_recommended_action %>%
+          arrange(desc(count)) %>%
+          select(action) %>%
+          pull() %>%
+          as.character()
+table_recommended_action$action <- factor(as.character(table_recommended_action$action),
+                                          levels=test)
+
+return(table_recommended_action)
+}
+
+```
+
+```{r "function_lollipopl", echo=FALSE}
+get_lollipop <- function(data,
+                         name.action,
+                         name.count) {
+g_global <- ggplot(data,
+                   aes_string(x=name.action,
+                              y=name.count))
+g_global <- g_global + 
+            geom_point(size=2) +
+            geom_segment(aes_string(x=name.action,
+                                    xend=name.action,
+                                    y=0,
+                                    yend=name.count))
+            theme_classic() + 
+            theme(axis.text.x=element_text(size=8))
+return(g_global)
+}
+```
+
+```{r "function_treemap_plot_global", echo=FALSE}
+get_treemap <- function(data,
+                        name.action,
+                        name.count) {
+n_countries <- sum(data[, name.count], 
+                   na.rm=TRUE)
+data$percentage <- data[, name.count] / n_countries
+data$action_and_count <- paste0(data[, name.action],
+                                "\n",
+                                data[, name.count],
+                                " (",
+                                round(100 * data$percentage, 
+                                      1),
+                                     "%)")
+treemap(data,
+            # data
+            index="action_and_count",
+            vSize=name.count,
+            type="index",
+            
+            # Main
+            title="",
+            palette="Dark2",
+
+            # Borders:
+            border.col=c("black"),             
+            border.lwds=1,                         
+        
+            # Labels
+            fontsize.labels=12,
+            fontcolor.labels="white",
+            fontface.labels=1,            
+            bg.labels=c("transparent"),              
+            align.labels=c("left", "top"),                                  
+            overlap.labels=0.5,
+            inflate.labels=FALSE)
+}
+```
+
+
+```{r "function_donut_plot_global", echo=FALSE}
+# Donut plots are not provided by ggplot2 or base R so I am hacking it together with this guide:
+# https://www.r-graph-gallery.com/128-ring-or-donut-plot.html, sinice donut plots have to be
+get_donut <- function(data,
+                      name.action,
+                      name.count) {
+# Compute percentages
+data$fraction <- data[, name.count] / sum(data[, name.count], 
+                                          na.rm=TRUE)
+data$percentage <- round(data$fraction * 100, 1)
+
+# Compute the cumulative percentages (top of each rectangle)
+data$ymax <- cumsum(data$fraction)
+
+# Compute the bottom of each rectangle
+data$ymin <- c(0, head(data$ymax, n=-1))
+
+# Compute label position
+data$labelPosition <- (data$ymax + data$ymin) / 2
+
+# Compute a good label
+data$label <- paste0(data[, name.action],
+                    "\n", 
+                     data[, name.count],
+                     " (",
+                     data$percentage,
+                     "%)")
+
+# Make the plot
+g_donut <- ggplot(data, 
+       aes(ymax=ymax, 
+           ymin=ymin, 
+           xmax=4, 
+           xmin=3, 
+           fill=action)) +
+  geom_rect(alpha=0.6) +
+  geom_text_repel(x=5.2, 
+            col="black",
+            aes(y=labelPosition, 
+                label=label, 
+                color=action), 
+            size=3) + # x here controls label position (inner / outer)
+  scale_fill_brewer(palette="Dark2") +
+#  scale_color_brewer(palette="Dark2") +
+  coord_polar(theta="y") +
+  xlim(c(-1, 4)) +
+  theme_void() +
+  theme(legend.position = "none") + 
+  theme(plot.margin=unit(c(1, 1, 1, 1),"cm"))
+return(g_donut)
+}
+```
+
+# Global plots of UNFPA recommended action
+```{r, "get_data_global", echo=FALSE}
+table_action_global <- get_table_recommended_action(data=our_data,
+                             var.name.action="UNFPA - recommended action",
+                             var.name.region="UNFPA Region")
+```
+## Lollipop plot
+```{r, "lollipop_plot_global", echo=FALSE}
+g_lollipop_global <- get_lollipop(data=table_action_global,
+             name.action="action",
+             name.count="count")
+g_lollipop_global + labs(x="",
+                         y="Count")
+```
+
+## Treemap plot
+```{r, "treemap_plot", echo=FALSE}
+get_treemap(data=table_action_global,
+            name.action="action",
+            name.count="count")
+```
+
+## Donut plot
+```{r, "donut_plot", echo=FALSE}
+get_donut(data=table_action_global,
+          name.action="action",
+          name.count="count")
+```
+
+
+# Regional plots of UNFPA recommended action
+```{r, "get_data_regional", echo=FALSE}
+table_action_APRO <- get_table_recommended_action(data=our_data,
+                             var.name.action="UNFPA - recommended action",
+                             var.name.region="UNFPA Region",
+                             specific.region="APRO")
+table_action_ASRO <- get_table_recommended_action(data=our_data,
+                             var.name.action="UNFPA - recommended action",
+                             var.name.region="UNFPA Region",
+                             specific.region="ASRO")
+table_action_EECARO <- get_table_recommended_action(data=our_data,
+                             var.name.action="UNFPA - recommended action",
+                             var.name.region="UNFPA Region",
+                             specific.region="EECARO")
+table_action_ESARO <- get_table_recommended_action(data=our_data,
+                             var.name.action="UNFPA - recommended action",
+                             var.name.region="UNFPA Region",
+                             specific.region="ESARO")
+table_action_LACRO <- get_table_recommended_action(data=our_data,
+                             var.name.action="UNFPA - recommended action",
+                             var.name.region="UNFPA Region",
+                             specific.region="LACRO")
+table_action_WCARO <- get_table_recommended_action(data=our_data,
+                             var.name.action="UNFPA - recommended action",
+                             var.name.region="UNFPA Region",
+                             specific.region="WCARO")
+```
+
+## APRO
+```{r, "lollipop_plot_APRO", echo=FALSE}
+get_lollipop(data=table_action_APRO,
+             name.action="action",
+             name.count="count")
+```
+```{r, "treemap_plot_APRO", echo=FALSE}
+get_treemap(data=table_action_APRO,
+            name.action="action",
+            name.count="count")
+```
+
+```{r, "donut_plot_APRO", echo=FALSE}
+get_donut(data=table_action_APRO,
+          name.action="action",
+          name.count="count")
+```
+
+## ASRO
+```{r, "lollipop_plot_ASRO", echo=FALSE}
+get_lollipop(data=table_action_ASRO,
+             name.action="action",
+             name.count="count")
+```
+```{r, "treemap_plot_ASRO", echo=FALSE}
+get_treemap(data=table_action_ASRO,
+            name.action="action",
+            name.count="count")
+```
+
+```{r, "donut_plot_ASRO", echo=FALSE}
+get_donut(data=table_action_ASRO,
+          name.action="action",
+          name.count="count")
+```
+
+## EECARO
+```{r, "lollipop_plot_EECARO", echo=FALSE}
+get_lollipop(data=table_action_EECARO,
+             name.action="action",
+             name.count="count")
+```
+```{r, "treemap_plot_EECARO", echo=FALSE}
+get_treemap(data=table_action_EECARO,
+            name.action="action",
+            name.count="count")
+```
+
+```{r, "donut_plot_EECARO", echo=FALSE}
+get_donut(data=table_action_EECARO,
+          name.action="action",
+          name.count="count")
+```
+
+## ESARO
+```{r, "lollipop_plot_ESARO", echo=FALSE}
+get_lollipop(data=table_action_ESARO,
+             name.action="action",
+             name.count="count")
+```
+```{r, "treemap_plot_ESARO", echo=FALSE}
+get_treemap(data=table_action_ESARO,
+            name.action="action",
+            name.count="count")
+```
+
+```{r, "donut_plot_ESARO", echo=FALSE}
+get_donut(data=table_action_ESARO,
+          name.action="action",
+          name.count="count")
+```
+
+## LACRO
+```{r, "lollipop_plot_LACRO", echo=FALSE}
+get_lollipop(data=table_action_LACRO,
+             name.action="action",
+             name.count="count")
+```
+```{r, "treemap_plot_LACRO", echo=FALSE}
+get_treemap(data=table_action_LACRO,
+            name.action="action",
+            name.count="count")
+```
+
+```{r, "donut_plot_LACRO", echo=FALSE}
+get_donut(data=table_action_LACRO,
+          name.action="action",
+          name.count="count")
+```
+
+## WCARO
+```{r, "lollipop_plot_WCARO", echo=FALSE}
+get_lollipop(data=table_action_WCARO,
+             name.action="action",
+             name.count="count")
+```
+```{r, "treemap_plot_WCARO", echo=FALSE}
+get_treemap(data=table_action_WCARO,
+            name.action="action",
+            name.count="count")
+```
+
+```{r, "donut_plot_WCARO", echo=FALSE}
+get_donut(data=table_action_WCARO,
+          name.action="action",
+          name.count="count")
+```
+
