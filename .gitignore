@@ -8,6 +8,10 @@ Plots/
 .Rhistory
 .Rapp.history
 
+# Notes to myself
+*to_consider*
+*.txt*
+
 # Session Data files
 .RData
 
