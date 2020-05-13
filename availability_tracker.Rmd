@@ -8,6 +8,7 @@ output:
 ---
 
 ```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+rm(list=ls())
 knitr::opts_chunk$set(echo = TRUE)
 #install.packages("googlesheets4") ## working with CRAN version of googlesheets4, not the dev version on GitHub
 library(googlesheets4)
@@ -22,10 +23,8 @@ var_name_region <- "UNFPA Region"
 var_name_country_type <- "Type"
 ```
 
-
-```{r "load_data", echo=FALSE, include=FALSE}
+```{r "load_data", echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
 our_url <- "https://docs.google.com/spreadsheets/d/1hjI8synLx3yfjTvfLBKgQc3Hj-XU_Lhoww_DxUTe59A/edit#gid=0"
-
 
 our_data_for_names <- read_sheet(ss=our_url,
                                  skip=8)
@@ -34,9 +33,16 @@ our_data <- read_sheet(ss=our_url,
                        skip=10) %>%
             as.data.frame()
 names(our_data) <- names(our_data_for_names)
+## re-code missing values more descriptive values
+our_data[is.na(our_data[, var_name_action]), 
+         var_name_action] <- "(Action not specified)"
+our_data[is.na(our_data[, var_name_region]), 
+         var_name_region] <- "(Region not specified)"
+our_data[is.na(our_data[, var_name_country_type]), 
+         var_name_country_type] <- "(Type not specified)"
 ```
 
-```{r "function_table_recommended_action_global", echo=FALSE}
+```{r "function_table_recommended_action_global", echo=FALSE, warning=FALSE, message=FALSE}
 get_table_recommended_action <- function(data,
                                          var.name.action,
                                          var.name.region,
@@ -49,13 +55,13 @@ if (is.null(specific.region) == FALSE) {
   stopifnot(specific.region %in% unique(data[, var.name.region]))
   data <- data[data[, var.name.region] == specific.region, ] 
 }
-  if (is.null(specific.country.type) == FALSE) {
+if (is.null(specific.country.type) == FALSE) {
   stopifnot(var.name.country.type %in% names(data))
   stopifnot(specific.country.type %in% unique(data[, var.name.country.type]))
   data <- data[data[, var.name.country.type] == specific.country.type, ] 
 }
-table_recommended_action <- as.data.frame(table(data[, var.name.action], 
-                                                useNA="always"))
+table_recommended_action <- as.data.frame(table(data[, var.name.action])) 
+                                                #useNA="always"))
 table_recommended_action <- table_recommended_action %>% rename("action"="Var1",
                                                                 "count"="Freq")
 table_recommended_action$count <- as.integer(table_recommended_action$count)
@@ -67,13 +73,15 @@ test <- table_recommended_action %>%
           as.character()
 table_recommended_action$action <- factor(as.character(table_recommended_action$action),
                                           levels=test)
-
+# save specific colors to be consistent across plots
+table_recommended_action$color <- hcl.colors(length(levels(table_recommended_action$action)),
+                                             "Dark2")
 return(table_recommended_action)
 }
 
 ```
 
-```{r "function_lollipop", echo=FALSE}
+```{r "function_lollipop", echo=FALSE, warning=FALSE, message=FALSE}
 get_lollipop <- function(data,
                          name.action,
                          name.count) {
@@ -95,7 +103,7 @@ return(g_global)
 }
 ```
 
-```{r "function_treemap_plot_global", echo=FALSE}
+```{r "function_treemap_plot_global", echo=FALSE, warning=FALSE, message=FALSE}
 get_treemap <- function(data,
                         name.action,
                         name.count) {
@@ -107,7 +115,7 @@ data$action_and_count <- paste0(data[, name.action],
                                 data[, name.count],
                                 " (",
                                 round(100 * data$percentage, 
-                                      1),
+                                      0),
                                      "%)")
 treemap(data,
             # data
@@ -135,16 +143,25 @@ treemap(data,
 ```
 
 
-```{r "function_donut_plot_global", echo=FALSE}
+```{r "function_donut_plot_global", echo=FALSE, warning=FALSE, message=FALSE}
 # Donut plots are not provided by ggplot2 or base R so I am hacking it together with this guide:
 # https://www.r-graph-gallery.com/128-ring-or-donut-plot.html, sinice donut plots have to be
 get_donut <- function(data,
+                      data_global,
                       name.action,
-                      name.count) {
+                      name.count,
+                      title="") {
 # Compute percentages
 data$fraction <- data[, name.count] / sum(data[, name.count], 
                                           na.rm=TRUE)
-data$percentage <- round(data$fraction * 100, 1)
+data$percentage <- round(data$fraction * 100, 0)
+
+# Merge in colors from global data
+data$color <- NULL
+k <- left_join(x=data,
+               y=data_global[, c(name.action, "color")],
+               by="action")
+data$color <- k$color
 
 # Compute the cumulative percentages (top of each rectangle)
 data$ymax <- cumsum(data$fraction)
@@ -170,208 +187,52 @@ g_donut <- ggplot(data,
            xmax=4, 
            xmin=3, 
            fill=action)) +
-  geom_rect(alpha=0.6) +
+  geom_rect(alpha=0.8) +
   geom_text_repel(x=5.2, 
             col="black",
             aes(y=labelPosition, 
                 label=label, 
                 color=action), 
-            size=3) + # x here controls label position (inner / outer)
-  scale_fill_brewer(palette="Dark2") +
-#  scale_color_brewer(palette="Dark2") +
+            force=0.9,
+            segment.size=0,
+            segment.alpha=0,
+            fontface="bold",
+            size=3) + # x here controls label position (inner / outer) +
+  scale_fill_manual("asdf",
+                    values=data$color) +
+  #scale_fill_brewer(palette="Dark2") +
+  #scale_color_brewer(palette="Dark2") +
   coord_polar(theta="y") +
   xlim(c(-1, 4)) +
   theme_void() +
   theme(legend.position = "none") + 
-  theme(plot.margin=unit(c(1, 1, 1, 1),"cm"))
+  theme(plot.margin=unit(c(1, 1, 1, 1),"cm")) +
+  theme(plot.title = element_text(hjust=0.5,
+                                  vjust=8,
+                                  size=16,
+                                  face="bold")) +
+  ggtitle(title)
 return(g_donut)
 }
 ```
 
 # Global plots of UNFPA recommended action
-```{r, "get_data_global", echo=FALSE}
+```{r, "get_data_global", echo=FALSE, warning=FALSE, message=FALSE}
 table_action_global <- get_table_recommended_action(data=our_data,
                              var.name.action=var_name_action,
                              var.name.region=var_name_region,
                              var.name.country.type=var_name_country_type)
 ```
 
-## Lollipop plot
-```{r, "lollipop_plot_global", echo=FALSE}
-g_lollipop_global <- get_lollipop(data=table_action_global,
-             name.action="action",
-             name.count="count")
-g_lollipop_global + labs(x="",
-                         y="Count")
-```
-
-## Donut plot
-```{r, "donut_plot", echo=FALSE}
+```{r, "donut_plot", echo=FALSE, warning=FALSE, message=FALSE}
 get_donut(data=table_action_global,
+          data_global=table_action_global, # (messy but just hacking together for now to merge colors)
           name.action="action",
           name.count="count")
-```
-
-## Treemap plot
-```{r, "treemap_plot", echo=FALSE}
-get_treemap(data=table_action_global,
-            name.action="action",
-            name.count="count")
-```
-
-
-# Regional plots of UNFPA recommended action
-```{r, "get_data_regional", echo=FALSE}
-table_action_APRO <- get_table_recommended_action(data=our_data,
-                             var.name.action=var_name_action,
-                             var.name.region=var_name_region,
-                             var.name.country.type=var_name_country_type,
-                             specific.region="APRO")
-table_action_ASRO <- get_table_recommended_action(data=our_data,
-                             var.name.action=var_name_action,
-                             var.name.region=var_name_region,
-                             var.name.country.type=var_name_country_type,
-                             specific.region="ASRO")
-table_action_EECARO <- get_table_recommended_action(data=our_data,
-                             var.name.action=var_name_action,
-                             var.name.region=var_name_region,
-                             var.name.country.type=var_name_country_type,
-                             specific.region="EECARO")
-table_action_ESARO <- get_table_recommended_action(data=our_data,
-                             var.name.action=var_name_action,
-                             var.name.region=var_name_region,
-                             var.name.country.type=var_name_country_type,
-                             specific.region="ESARO")
-table_action_LACRO <- get_table_recommended_action(data=our_data,
-                             var.name.action=var_name_action,
-                             var.name.region=var_name_region,
-                             var.name.country.type=var_name_country_type,
-                             specific.region="LACRO")
-table_action_WCARO <- get_table_recommended_action(data=our_data,
-                             var.name.action=var_name_action,
-                             var.name.region=var_name_region,
-                             var.name.country.type=var_name_country_type,
-                             specific.region="WCARO")
-```
-
-## APRO
-```{r, "lollipop_plot_APRO", echo=FALSE}
-get_lollipop(data=table_action_APRO,
-             name.action="action",
-             name.count="count")
-```
-```{r, "donut_plot_APRO", echo=FALSE}
-get_donut(data=table_action_APRO,
-          name.action="action",
-          name.count="count")
-```
-```{r, "treemap_plot_APRO", echo=FALSE}
-get_treemap(data=table_action_APRO,
-            name.action="action",
-            name.count="count")
-```
-
-
-## ASRO
-```{r, "lollipop_plot_ASRO", echo=FALSE}
-get_lollipop(data=table_action_ASRO,
-             name.action="action",
-             name.count="count")
-```
-
-```{r, "treemap_plot_ASRO", echo=FALSE}
-get_treemap(data=table_action_ASRO,
-            name.action="action",
-            name.count="count")
-```
-
-```{r, "donut_plot_ASRO", echo=FALSE}
-get_donut(data=table_action_ASRO,
-          name.action="action",
-          name.count="count")
-```
-
-
-## EECARO
-```{r, "lollipop_plot_EECARO", echo=FALSE}
-get_lollipop(data=table_action_EECARO,
-             name.action="action",
-             name.count="count")
-```
-
-```{r, "donut_plot_EECARO", echo=FALSE}
-get_donut(data=table_action_EECARO,
-          name.action="action",
-          name.count="count")
-```
-
-```{r, "treemap_plot_EECARO", echo=FALSE}
-get_treemap(data=table_action_EECARO,
-            name.action="action",
-            name.count="count")
-```
-
-
-## ESARO
-```{r, "lollipop_plot_ESARO", echo=FALSE}
-get_lollipop(data=table_action_ESARO,
-             name.action="action",
-             name.count="count")
-```
-
-```{r, "donut_plot_ESARO", echo=FALSE}
-get_donut(data=table_action_ESARO,
-          name.action="action",
-          name.count="count")
-```
-
-```{r, "treemap_plot_ESARO", echo=FALSE}
-get_treemap(data=table_action_ESARO,
-            name.action="action",
-            name.count="count")
-```
-
-
-## LACRO
-```{r, "lollipop_plot_LACRO", echo=FALSE}
-get_lollipop(data=table_action_LACRO,
-             name.action="action",
-             name.count="count")
-```
-
-```{r, "donut_plot_LACRO", echo=FALSE}
-get_donut(data=table_action_LACRO,
-          name.action="action",
-          name.count="count")
-```
-
-```{r, "treemap_plot_LACRO", echo=FALSE}
-get_treemap(data=table_action_LACRO,
-            name.action="action",
-            name.count="count")
-```
-
-## WCARO
-```{r, "lollipop_plot_WCARO", echo=FALSE}
-get_lollipop(data=table_action_WCARO,
-             name.action="action",
-             name.count="count")
-```
-
-```{r, "donut_plot_WCARO", echo=FALSE}
-get_donut(data=table_action_WCARO,
-          name.action="action",
-          name.count="count")
-```
-
-```{r, "treemap_plot_WCARO", echo=FALSE}
-get_treemap(data=table_action_WCARO,
-            name.action="action",
-            name.count="count")
 ```
 
 # Country-type plots of UNFPA recommended action
-```{r, "get_data_type", echo=FALSE}
+```{r, "get_data_type", echo=FALSE, warning=FALSE, message=FALSE}
 table_action_O <- get_table_recommended_action(data=our_data,
                              var.name.action=var_name_action,
                              var.name.region=var_name_region,
@@ -384,45 +245,210 @@ table_action_P <- get_table_recommended_action(data=our_data,
                              specific.country.type="P")
 ```
 
-## Operational-Response
-```{r, "lollipop_plot_operational", echo=FALSE}
-get_lollipop(data=table_action_O,
-             name.action="action",
-             name.count="count")
-```
-
-```{r, "donut_plot_operational", echo=FALSE}
-donut_O <- get_donut(data=table_action_O,
-          name.action="action",
-          name.count="count")
-donut_O
-```
-
-
-```{r, "treemap_plot_operational", echo=FALSE}
-get_treemap(data=table_action_O,
-            name.action="action",
-            name.count="count")
-```
-
-## Preparedness
-```{r, "lollipop_plot_preparedness", echo=FALSE}
-get_lollipop(data=table_action_P,
-             name.action="action",
-             name.count="count")
-```
-
-```{r, "donut_plot_preparedness", echo=FALSE}
+```{r, "donut_plots_by_type", echo=FALSE, warning=FALSE, message=FALSE}
 donut_P <- get_donut(data=table_action_P,
+                     data_global=table_action_global,
           name.action="action",
-          name.count="count")
-donut_P
+          name.count="count",
+          title="Preparedness \nCountries")
+donut_O <- get_donut(data=table_action_O,
+                     data_global=table_action_global,
+          name.action="action",
+          name.count="count",
+          title="Operational Response \nCountries")
+grid.arrange(donut_P,
+           donut_O,
+           nrow=1,
+           ncol=2)
 ```
 
-```{r, "treemap_plot_preparedness", echo=FALSE}
-get_treemap(data=table_action_P,
-            name.action="action",
-            name.count="count")
+# Regional plots of UNFPA recommended action
+```{r, "get_data_regional", echo=FALSE, warning=FALSE, message=FALSE}
+# APRO
+table_action_APRO_P <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="APRO",
+                             specific.country.type="P")
+table_action_APRO_O <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="APRO",
+                             specific.country.type="O")
+# ASRO
+table_action_ASRO_P <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="ASRO",
+                             specific.country.type="P")
+table_action_ASRO_O <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="ASRO",
+                             specific.country.type="O")
+# EECARO
+table_action_EECARO_P <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="EECARO",
+                             specific.country.type="P")
+table_action_EECARO_O <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="EECARO",
+                             specific.country.type="O")
+# ESARO
+table_action_ESARO_P <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="ESARO",
+                             specific.country.type="P")
+table_action_ESARO_O <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="ESARO",
+                             specific.country.type="O")
+# LACRO
+table_action_LACRO_P <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="LACRO",
+                             specific.country.type="P")
+table_action_LACRO_O <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="LACRO",
+                             specific.country.type="O")
+# WCARO
+table_action_WCARO_P <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="WCARO",
+                             specific.country.type="P")
+table_action_WCARO_O <- get_table_recommended_action(data=our_data,
+                             var.name.action=var_name_action,
+                             var.name.region=var_name_region,
+                             var.name.country.type=var_name_country_type,
+                             specific.region="WCARO",
+                             specific.country.type="O")
+
 ```
 
+## APRO
+```{r, "donut_plot_APRO", echo=FALSE, warning=FALSE, message=FALSE}
+donut_APRO_P <- get_donut(data=table_action_APRO_P,
+                          data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Preparedness \nCountries")
+donut_APRO_O <- get_donut(data=table_action_APRO_O,
+                          data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Operational Response \nCountries")
+grid.arrange(donut_APRO_P,
+             donut_APRO_O,
+             nrow=1,
+             ncol=2)
+```
 
+## ASRO
+```{r, "donut_plot_ASRO", echo=FALSE, warning=FALSE, message=FALSE}
+donut_ASRO_P <- get_donut(data=table_action_ASRO_P,
+                          data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Preparedness \nCountries")
+donut_ASRO_O <- get_donut(data=table_action_ASRO_O,
+                          data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Operational Response \nCountries")
+grid.arrange(donut_ASRO_P,
+             donut_ASRO_O,
+             nrow=1,
+             ncol=2)
+```
+
+## EECARO
+```{r, "donut_plot_EECARO", echo=FALSE, warning=FALSE, message=FALSE}
+donut_EECARO_P <- get_donut(data=table_action_EECARO_P,
+                            data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Preparedness \nCountries")
+donut_EECARO_O <- get_donut(data=table_action_EECARO_O,
+                            data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Operational Response \nCountries")
+grid.arrange(donut_EECARO_P,
+             donut_EECARO_O,
+             nrow=1,
+             ncol=2)
+```
+
+## ESARO
+```{r, "donut_plot_ESARO", echo=FALSE, warning=FALSE, message=FALSE}
+donut_ESARO_P <- get_donut(data=table_action_ESARO_P,
+                           data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Preparedness \nCountries")
+donut_ESARO_O <- get_donut(data=table_action_ESARO_O,
+                           data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Operational Response \nCountries")
+grid.arrange(donut_ESARO_P,
+             donut_ESARO_O,
+             nrow=1,
+             ncol=2)
+```
+
+## LACRO
+```{r, "donut_plot_LACRO", echo=FALSE, warning=FALSE, message=FALSE}
+donut_LACRO_P <- get_donut(data=table_action_LACRO_P,
+                           data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Preparedness \nCountries")
+donut_LACRO_O <- get_donut(data=table_action_LACRO_O,
+                           data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Operational Response \nCountries")
+grid.arrange(donut_LACRO_P,
+             donut_LACRO_O,
+             nrow=1,
+             ncol=2)
+```
+
+## WCARO
+```{r, "donut_plot_WCARO", echo=FALSE, warning=FALSE, message=FALSE}
+donut_WCARO_P <- get_donut(data=table_action_WCARO_P,
+                           data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Preparedness \nCountries")
+donut_WCARO_O <- get_donut(data=table_action_WCARO_O,
+                           data_global=table_action_global,
+                          name.action="action",
+                          name.count="count",
+                          title="Operational Response \nCountries")
+grid.arrange(donut_WCARO_P,
+             donut_WCARO_O,
+             nrow=1,
+             ncol=2)
+```
